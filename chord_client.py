@@ -1,6 +1,7 @@
 #! /usr/bin/python3
 
 import socket
+import sys
 import threading
 from chord_tools import *
 
@@ -15,16 +16,56 @@ def printer():
             json_data = json_recv(clientsocket)
             print(json_data)
 
+            if json_data['type'] == 'stat':
+                print('*** Statistiques ***')
+                print('Requêtes get : ', json_data['get'])
+                print('Requêtes update : ', json_data['update'])
+                print('Gestion : ', json_data['gestion'])
+
+                sys.exit(0)
+
 
 printer_thread = threading.Thread(target=printer)
 printer_thread.start()
 
-# data = [{'test':22}, 'other test', 88]
 data = [
-    ['get', 0, 'localhost', 9000],
-    ['update', 0, 'tata', 'localhost', 9000],
-    ['get', 0, 'localhost', 9000]
+    {
+        'type': 'get',
+        'key': 3,
+        'ip': 'localhost',
+        'port': 9000
+    },
+    {
+        'type': 'update',
+        'key': 80000,
+        'val': 11,
+        'ip': 'localhost',
+        'port': 9000
+    },
+    {
+        'type': 'get',
+        'key': 18215,
+        'ip': 'localhost',
+        'port': 9000
+    },
+    {
+        'type': 'get',
+        'key': 36094,
+        'ip': 'localhost',
+        'port': 9000
+    },
+    {
+        'type': 'get',
+        'key': 80000,
+        'ip': 'localhost',
+        'port': 9000
+    },
+    {
+        'type': 'quit',
+        'ip': 'localhost',
+        'port': 9000
+    }
 ]
 
 for d in data:
-    json_send('localhost', 8001, d)
+    json_send('localhost', 10000, d)
