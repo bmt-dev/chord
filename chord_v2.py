@@ -2,6 +2,7 @@
 
 # run command : (init) python chord_v2.py 10000 ; (join) python chord_v2.py 12000 127.0.0.1 10000
 
+import os
 import sys
 import socket
 import json
@@ -17,6 +18,8 @@ class Node:
         self.successor = self
         self.chord_data = {}
         self.stat = NodeStat(2)
+        self.input = InputThread(self.id, self.console)
+        self.silent_mode = False
 
     def get_successor(self):
         return self.successor
@@ -29,6 +32,21 @@ class Node:
 
     def set_predecessor(self, node):
         self.predecessor = node
+
+    def leave(self):
+        # on doit maintenir le cercle (succ et pred) après des départs
+        # je dis à mon successeur que son prédecesseur est mon prédecesseur et je lui transfère les clés que je gère
+        # je dis à mon prédecesseur que son successeur est mon successeur
+        # et bye!
+
+        self.send(self.get_successor().ip, self.get_successor().port, {'type': 'leave', 'idp': self.get_predecessor(
+        ).id, 'ipp': self.get_predecessor().ip, 'portp': self.get_predecessor().port, 'data': self.chord_data})
+
+        self.send(self.get_predecessor().ip, self.get_predecessor().port, {'type': 'leave', 'ids': self.get_successor(
+        ).id, 'ipps': self.get_successor().ip, 'ports': self.get_successor().port})
+
+        print('Leaving ...')
+        os._exit(0)
 
     def set_data(self, data):
         try:
@@ -54,9 +72,35 @@ class Node:
             # return ack
             self.send(ip, port, {'type': 'respUpdateAck', 'key': key})
 
+    def console(self, cmd):
+        if cmd.lower() == 'i':
+            print('Je suis le noeud ' + str(self.id) + ', IP: ' +
+                  self.ip + ', PORT: ' + str(self.port))
+        elif cmd.lower() == 'p':
+            print('Mon prédecesseur :\n ID: ' + str(self.get_predecessor().id) + ', IP: ' +
+                  self.get_predecessor().ip + ', PORT: ' + str(self.get_predecessor().port))
+        elif cmd.lower() == 's':
+            print('Mon successeur :\n ID: ' + str(self.get_successor().id) + ', IP: ' +
+                  self.get_successor().ip + ', PORT: ' + str(self.get_successor().port))
+        elif cmd.lower() == 't':
+            print('La table de voisinage n\'est pas supportée dans cette version.')
+        elif cmd.lower() == 'm':
+            if self.silent_mode:
+                print('Mode silence désactivé, l\'envoi de messages sera affiché.')
+            else:
+                print('Mode silence activé, l\'envoi de messages ne sera plus affiché.')
+            self.silent_mode = not self.silent_mode
+        elif cmd.lower() == 'c':
+            print('Je gère : ', self.chord_data)
+        elif cmd.lower() == 'q':
+            self.leave()
+        else:
+            print('Mauvaise commande, Réessayer')
+
     def send(self, ip, port, data):
-        print('Sending [' + data['type'] + '] request to ' +
-              ip + ' ' + str(port))
+        if not self.silent_mode:
+            print('Sending [' + data['type'] + '] request to ' +
+                  ip + ' ' + str(port))
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((ip, port))
@@ -78,12 +122,12 @@ class Node:
                 break
             data += tmp
         result = json.loads(data)
-        print('[' + result['type'] + '] received')
+        if not self.silent_mode:
+            print('[' + result['type'] + '] received')
 
         type = result['type']
 
-        if type != 'get' and type != 'update':
-            # other msg (plop, ok, nok, ...)
+        if type in ['ok', 'plop', 'nok', 'joind',]:
             self.stat.new_gestion()
 
         return result
@@ -91,11 +135,12 @@ class Node:
     def run(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as serversocket:
             serversocket.bind((self.ip, self.port))
-            serversocket.listen(5)
-            print('listening on port:', serversocket.getsockname()[1])
+            serversocket.listen(200)
+            print('Adresse IP: ' + self.ip + ', Port No: ' + str(self.port))
+            # print('listening on port:', serversocket.getsockname()[1])
 
             if len(sys.argv) == 2:
-                self.chord_data = generate_random_data(amount=50)
+                self.chord_data = generate_random_data(amount=10)
                 print(f'Initial chord node ID : {self.id}')
                 print('Stored keys : ', self.chord_data)
 
@@ -110,10 +155,12 @@ class Node:
                 print('Bad arguments passed')
                 sys.exit(1)
 
+            self.input.start()
+
             while True:
                 (clientsocket, address) = serversocket.accept()
                 json_data = self.recv(clientsocket)
-                print(json_data)
+                # print(json_data)
 
                 type = json_data['type']
 
@@ -187,8 +234,15 @@ class Node:
                 elif type == 'nok':
                     print('Cannot join the chord ring')
 
-                    # try again with another id
-                    # TODO
+                    # try again with another ID
+                    retry_id = random.randint(0, MAX - 1)
+                    self.id = retry_id
+                    self.input.id = retry_id
+                    existing_node_ip = sys.argv[2]
+                    existing_node_port = int(sys.argv[3])
+                    print(f'Retrying to join with ID {self.id}')
+                    self.send(existing_node_ip, existing_node_port, {'type': 'joind',
+                                                                     'id': self.id, 'ip': self.ip, 'port': self.port})
 
                 elif type == 'ok':
                     # set predecessor and successor
@@ -232,6 +286,21 @@ class Node:
                     print('Mon successeur : ', self.get_successor().id)
                     print('Mon prédécesseur : ', self.get_predecessor().id)
 
+                elif type == 'leave':
+                    if json_data.get('idp'):
+                        node = Node(
+                            json_data['idp'], json_data['ipp'], json_data['portp'])
+                        self.set_predecessor(node)
+
+                        print('Clés migrés depuis mon prédecesseur : ',
+                              json_data['data'])
+                        self.set_data({**self.chord_data, **json_data['data']})
+
+                    elif json_data.get('ids'):
+                        node = Node(json_data['ids'],
+                                    json_data['ipps'], json_data['ports'])
+                        self.set_successor(node)
+
                 elif type == 'quit':
                     # le client envoie la commande quit pour récupérer les statistiques et faire quitter les noeuds chord
                     # on doit connaitre l'id du noeud qui a recu le quit du client pour nous assurer de faire le tour du cercle
@@ -254,7 +323,7 @@ class Node:
                         else:
                             # le quit a fait le tour du cercle, j'envoie au client les statistiques
                             self.send(client_ip, client_port, {
-                                'type': 'stat', 'get': json_data['get'], 'update': json_data['update'], 'gestion': json_data['gestion']})
+                                'type': 'stat', 'get': json_data['get'], 'update': json_data['update'], 'gestion': json_data['gestion'], 'v': self.stat.version})
 
                             print(f'Closing Node {self.id}')
                             sys.exit(0)
@@ -267,8 +336,19 @@ class Node:
                 else:
                     print('BAD COMMAND')
 
+                print('--- Choisir une commande ---')
+                print('[M]ode silence')
+                print('[I]nfo')
+                print('[P]rédecesseur')
+                print('[S]uccesseur')
+                print('[T]able de voisinage')
+                print('[C]lés en ma possession')
+                print('[Q]uitter')
+                print('NODE_' + str(self.id) + '> ', end='')
+
 
 if __name__ == '__main__':
+    # random.seed(900)
     node_id = random.randint(0, MAX - 1)
     n = Node(node_id)
     n.run()

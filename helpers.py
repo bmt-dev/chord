@@ -1,8 +1,7 @@
 import random
 import threading
 
-# k = 16
-k = 4
+k = 16
 MAX = 2**k  # 0 .. 2^k - 1
 
 
@@ -26,6 +25,19 @@ def between(value, init, end):
     return init < value < end
 
 
+def between_ft(value, init, end):
+    if init == end:
+        return False
+    elif value == init:
+        return True
+    elif init > end:
+        shift = MAX - init
+        init = 0
+        end = (end + shift) % MAX
+        value = (value + shift) % MAX
+    return init < value < end
+
+
 def betweenE(value, init, end):
     if value == end:
         return True
@@ -33,19 +45,19 @@ def betweenE(value, init, end):
         return between(value, init, end)
 
 
-def Ebetween(value, init, end):
-    if value == init:
-        return True
-    else:
-        return between(value, init, end)
+# def Ebetween(value, init, end):
+#     if value == init:
+#         return True
+#     else:
+#         return between(value, init, end)
 
 
 def generate_random_data(amount: int = 5):
     if amount > MAX:
-        print('5 keys generated')
-        amount = 5
+        amount = MAX
     keys = random.sample(range(0, MAX), amount)
     values = random.sample(range(0, 2**k * 15), amount)
+    print(f'{amount} keys generated')
     return dict(zip(keys, values))
 
 
@@ -82,13 +94,13 @@ class InputThread(threading.Thread):
     def __init__(self, node_id, callback):
         super(InputThread, self).__init__()
         self.daemon = True
-        # self.last_user_input = None
         self.id = node_id
         self.callback = callback
 
     def run(self):
         while True:
             print('--- Choisir une commande ---')
+            print('[M]ode silence')
             print('[I]nfo')
             print('[P]rédecesseur')
             print('[S]uccesseur')
